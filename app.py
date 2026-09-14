@@ -1,5 +1,5 @@
 
-import gradio as gr
+import streamlit as st
 import numpy as np
 import torch
 import cv2
@@ -7,6 +7,41 @@ from PIL import Image
 import torchvision.transforms.functional as TF
 from ultralytics import YOLO
 from torchvision.models.detection import ssdlite320_mobilenet_v3_large
+
+st.set_page_config(page_title="HAYTHIX AI — Smart Helmet Detection", layout="wide")
+
+CUSTOM_CSS = """
+<style>
+.stApp {
+    background-color: #0F1620;
+}
+h1, h2, h3 {
+    color: #E8A33D !important;
+}
+p, label, .stMarkdown {
+    color: #D6DCE2 !important;
+}
+.stButton>button {
+    background-color: #E8A33D;
+    color: #0F1620;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    padding: 0.6em 1.4em;
+}
+.stButton>button:hover {
+    opacity: 0.88;
+    color: #0F1620;
+}
+[data-testid="stSidebar"] {
+    background-color: #161F2C;
+}
+.block-container {
+    padding-top: 2rem;
+}
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -20,24 +55,29 @@ CLASS_NAMES = [
     "passenger_without_helemt"
 ]
 
-yolo_model = YOLO("best_yolo.pt")
 
-ssd_model = ssdlite320_mobilenet_v3_large(
-    weights=None,
-    weights_backbone=None,
-    num_classes=8
-)
-ssd_model.load_state_dict(
-    torch.load("best_ssd.pth", map_location=device, weights_only=True)
-)
-ssd_model.to(device)
-ssd_model.eval()
+@st.cache_resource
+def load_models():
+    yolo_model = YOLO("best_yolo.pt")
+
+    ssd_model = ssdlite320_mobilenet_v3_large(
+        weights=None,
+        weights_backbone=None,
+        num_classes=8
+    )
+    ssd_model.load_state_dict(
+        torch.load("best_ssd.pth", map_location=device, weights_only=True)
+    )
+    ssd_model.to(device)
+    ssd_model.eval()
+
+    return yolo_model, ssd_model
+
+
+yolo_model, ssd_model = load_models()
 
 
 def predict(image, model_choice):
-    if image is None:
-        return None, "Please upload an image."
-
     if model_choice == "YOLO":
         results = yolo_model.predict(source=image, conf=0.30, verbose=False)
         result = results[0]
@@ -80,110 +120,35 @@ def predict(image, model_choice):
 
             detections.append(f"{CLASS_NAMES[label_id]}  —  {confidence:.2%}")
 
-    detection_text = "\n".join(detections) if detections else "No objects detected."
-    return output_image, detection_text
+    return output_image, detections
 
 
-CUSTOM_CSS = """
-:root {
-    --brand-navy: #0F1620;
-    --brand-gold: #E8A33D;
-}
+st.markdown("<p style='letter-spacing:2px; color:#6B7684; text-transform:uppercase;'>HAYTHIX AI</p>", unsafe_allow_html=True)
+st.title("Smart Helmet Detection")
+st.write("Upload a road image and choose YOLO or SSD to detect riders, passengers, bikes, and helmet compliance.")
 
-.gradio-container {
-    background: var(--brand-navy) !important;
-    font-family: "Inter", "Segoe UI", sans-serif !important;
-}
+col1, col2 = st.columns(2)
 
-#header-block {
-    text-align: center;
-    padding: 28px 12px 8px 12px;
-}
+with col1:
+    uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png"])
+    model_choice = st.radio("Detection Model", ["YOLO", "SSD"], horizontal=True)
+    run_button = st.button("Run Detection")
 
-#header-block h1 {
-    color: var(--brand-gold) !important;
-    font-size: 2.1rem !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px !important;
-}
+with col2:
+    if uploaded_file and run_button:
+        image = Image.open(uploaded_file).convert("RGB")
+        output_image, detections = predict(image, model_choice)
 
-#header-block p {
-    color: #B8C2CC !important;
-    font-size: 0.95rem !important;
-}
+        st.image(output_image, caption="Detection Result", use_container_width=True)
 
-#brand-tag {
-    color: #6B7684 !important;
-    font-size: 0.8rem !important;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-}
+        if detections:
+            st.text_area("Detected Objects", "\n".join(detections), height=200)
+        else:
+            st.info("No objects detected.")
+    elif not uploaded_file:
+        st.write("Upload an image and click Run Detection to see results here.")
 
-.gr-panel, .block {
-    background: #161F2C !important;
-    border: 1px solid #232E3D !important;
-    border-radius: 14px !important;
-}
-
-button.primary {
-    background: var(--brand-gold) !important;
-    color: var(--brand-navy) !important;
-    font-weight: 600 !important;
-    border: none !important;
-    border-radius: 10px !important;
-}
-
-button.primary:hover {
-    opacity: 0.88 !important;
-}
-
-label span {
-    color: #D6DCE2 !important;
-    font-weight: 500 !important;
-}
-
-textarea, input {
-    background: #0F1620 !important;
-    color: #E8A33D !important;
-    border: 1px solid #232E3D !important;
-}
-
-footer {
-    display: none !important;
-}
-"""
-
-with gr.Blocks(title="HAYTHIX AI — Smart Helmet Detection", css=CUSTOM_CSS) as demo:
-
-    with gr.Column(elem_id="header-block"):
-        gr.Markdown("<p id='brand-tag'>HAYTHIX AI</p>")
-        gr.Markdown("# Smart Helmet Detection")
-        gr.Markdown("Upload a road image and choose YOLO or SSD to detect riders, passengers, bikes, and helmet compliance in real time.")
-
-    with gr.Row():
-        with gr.Column():
-            image_input = gr.Image(type="pil", label="Upload Image")
-            model_choice = gr.Radio(
-                ["YOLO", "SSD"],
-                value="YOLO",
-                label="Detection Model"
-            )
-            predict_button = gr.Button("Run Detection", variant="primary")
-
-        with gr.Column():
-            output_image = gr.Image(label="Detection Result")
-            output_text = gr.Textbox(label="Detected Objects", lines=10)
-
-    gr.Markdown(
-        "<p style='text-align:center; color:#6B7684; font-size:0.8rem; margin-top:20px;'>"
-        "Built by HAYTHIX AI — DevOps & AI Automation</p>"
-    )
-
-    predict_button.click(
-        fn=predict,
-        inputs=[image_input, model_choice],
-        outputs=[output_image, output_text]
-    )
-
-demo.launch(server_name="0.0.0.0", server_port=7860)
+st.markdown(
+    "<p style='text-align:center; color:#6B7684; font-size:0.8rem; margin-top:2rem;'>Built by HAYTHIX AI — DevOps & AI Automation</p>",
+    unsafe_allow_html=True
+)
