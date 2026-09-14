@@ -1,0 +1,6 @@
+gradio==5.50.0
+ultralytics
+torch
+torchvision
+pillow
+numpy
